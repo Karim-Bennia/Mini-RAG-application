@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, UploadFile, status
+from fastapi import FastAPI, APIRouter, Depends, UploadFile, status,Request
 from fastapi.responses import JSONResponse
 import os
 from helpers.config import get_settings, Settings
@@ -7,6 +7,8 @@ import aiofiles
 from models import ResponseSignal
 import logging
 from .schemes.data import ProcessRequest
+from uuid import uuid4
+from stores.llm.templates.prompt_template import PromptTemplate
 
 logger = logging.getLogger('uvicorn.error')
 
@@ -63,7 +65,8 @@ async def upload_data(project_id: str, file: UploadFile,
         )
 
 @data_router.post("/process/{project_id}")
-async def process_endpoint(project_id: str, process_request: ProcessRequest):
+async def process_endpoint(project_id: str, process_request: ProcessRequest, request: Request,
+):
 
     file_id = process_request.file_id
     chunk_size = process_request.chunk_size
@@ -87,5 +90,158 @@ async def process_endpoint(project_id: str, process_request: ProcessRequest):
                 "signal": ResponseSignal.PROCESSING_FAILED.value
             }
         )
+    
+    embedding_client = request.app.embedding_client
+    vectordb_client = request.app.vectordb_client
 
-    return file_chunks
+        
+    texts = []
+    vectors = []
+    metadata = []
+    record_ids = []
+
+    collection_name = f"{project_id}_{file_id}"
+
+    print(collection_name)
+    # Create collection if not exist or reset if needed
+    vectordb_client.create_collection(
+        collection_name=collection_name,
+        embedding_size=embedding_client.embedding_size,
+        do_reset=True
+    )
+    for idx, chunk in enumerate(file_chunks):
+        if not hasattr(chunk, "text") or not chunk.text.strip():
+            continue
+        clean_text = chunk.text.strip()
+        vector = embedding_client.embed_text(clean_text)
+        if vector is None:
+            continue  # skip failed embeddings
+
+        texts.append(clean_text)
+
+        vectors.append(vector)
+
+        metadata.append({
+            "file_id": file_id,
+            "chunk_index": idx,
+            "project_id": project_id,
+        })
+        record_ids.append(str(uuid4()))
+
+    if not texts:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"signal": ResponseSignal.PROCESSING_FAILED.value}
+        )
+
+    success = vectordb_client.insert_many(
+        collection_name=collection_name,
+        texts=texts,
+        vectors=vectors,
+        metadata=metadata,
+        record_ids=record_ids
+    )
+
+    if not success:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"signal": ResponseSignal.PROCESSING_FAILED.value}
+        )
+
+    return {
+        "signal": ResponseSignal.PROCESSING_SUCCESS.value,
+        "chunks_stored": len(texts),
+        "collection": collection_name
+    }
+
+
+@data_router.post("/query/{project_id}")
+async def query_endpoint(
+    request: Request,
+    project_id: str
+):
+    # Get the raw request body (question and top_k)
+    body = await request.json()
+    question = body.get("question")
+    top_k = body.get("top_k", 5)  # Default to 5 if top_k is not provided
+    file_id = body.get("file_id")  # Assuming file_id is part of the request
+
+    metadata_filter = {}
+    metadata_filter["file_id"] = file_id
+
+
+    if not question:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"signal": "Missing question"}
+        )
+
+    # Embed the user question
+    embedding_client = request.app.embedding_client
+    question_vector = embedding_client.embed_text(question)
+
+    vectordb_client = request.app.vectordb_client
+    collection_name = f"{project_id}_{file_id}"
+
+
+    if question_vector is None:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"signal": "Question embedding failed"}
+        )
+
+    # Search for top-k relevant chunks from ChromaDB
+    
+    search_results = vectordb_client.search_by_vector(
+        collection_name=collection_name,
+        vector=question_vector,
+        limit=top_k,
+        metadata_filter=metadata_filter
+    
+        )
+    
+
+    print("after vectore search:",search_results)
+
+    if not search_results:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"signal": "No relevant chunks found"}
+        )
+
+    # Prepare context (top-k chunks) for LLM
+    context =  "\n".join([doc for result in search_results['documents'] for doc in result])
+
+    # Generate AI response using the context and question
+    generation_client = request.app.generation_client
+
+    prompt_template = PromptTemplate()
+    prompt = prompt_template.create_question_prompt(question, context)
+
+
+    answer = generation_client.generate_text(prompt)
+
+    if not answer:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"signal": "Answer generation failed"}
+        )
+
+    # Prepare response with the answer and sources
+   
+    sources = [
+        {
+         "text": result,  # result is a dictionary
+         "file_id":  "unknown",
+         "chunk_index": "unknown"
+
+        }
+        for result in search_results
+    ]
+
+    return JSONResponse(
+        content={
+            "answer": answer,
+            "sources": sources
+        }
+    )
