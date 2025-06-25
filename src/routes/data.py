@@ -201,7 +201,6 @@ async def query_endpoint(
         )
     
 
-    print("after vectore search:",search_results)
 
     if not search_results:
         return JSONResponse(
@@ -210,7 +209,7 @@ async def query_endpoint(
         )
 
     # Prepare context (top-k chunks) for LLM
-    context =  "\n".join([doc for result in search_results['documents'] for doc in result])
+    context = "\n".join([doc for doc in search_results['documents'][0]])
 
     # Generate AI response using the context and question
     generation_client = request.app.generation_client
@@ -231,12 +230,12 @@ async def query_endpoint(
    
     sources = [
         {
-         "text": result,  # result is a dictionary
-         "file_id":  "unknown",
-         "chunk_index": "unknown"
+         "text": doc,  # result is a dictionary
+         "file_id": metadata['file_id'],
+         "chunk_index": metadata['chunk_index']
 
         }
-        for result in search_results
+        for doc, metadata in zip(search_results['documents'][0], search_results['metadatas'][0])
     ]
 
     return JSONResponse(
