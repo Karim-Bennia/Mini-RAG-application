@@ -10,7 +10,7 @@ app = FastAPI()
 
 origins = [
     "http://localhost:3000",
-    "https://your-vercel-app.vercel.app" 
+    " https://mini-rag-application.onrender.com" 
 ]
 
 app.add_middleware(
