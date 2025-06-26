@@ -9,7 +9,8 @@ from stores.vectordb.VectorDBProviderFactory import VectorDBProviderFactory
 app = FastAPI()
 
 origins = [
-    "http://localhost:3000", 
+    "http://localhost:3000",
+    "https://your-vercel-app.vercel.app" 
 ]
 
 app.add_middleware(
