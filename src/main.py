@@ -10,7 +10,7 @@ app = FastAPI()
 
 origins = [
     "http://localhost:3000",
-    " https://mini-rag-application.onrender.com" 
+    "https://mini-rag-application.onrender.com" 
 ]
 
 app.add_middleware(
