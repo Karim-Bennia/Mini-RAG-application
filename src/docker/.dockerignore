@@ -1,0 +1,24 @@
+# Ignore environment files and secrets
+.env
+.env.*
+
+# Bytecode and cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS junk
+.DS_Store
+
+# Local tools
+.vscode/
+.idea/
+
+# Python virtual environments
+venv/
+.env/
+
+# Docker files not needed in the image
+docker/
+Dockerfile
+docker-compose.yml
