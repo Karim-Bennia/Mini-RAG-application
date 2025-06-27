@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: src/docker/dockerfile
+    container_name: mini-rag-backend
+    ports:
+      - "5000:5000"
+    env_file:
+      - src/.env
+    volumes:
+      - ./src:/app
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../Frontend
+      dockerfile: ../Frontend/docker/Dockerfile
+      args:
+        NEXT_JS_FORCE_WEBPACK: "true"
+    container_name: mini-rag-frontend
+    ports:
+      - "3000:3000"
+    env_file:
+      - ../Frontend/.env
+    environment:
+      - NEXT_JS_FORCE_WEBPACK=true
+    volumes:
+      - ../Frontend:/app
+    depends_on:
+      - backend
+    restart: unless-stopped
