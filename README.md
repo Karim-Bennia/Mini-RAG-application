@@ -1,6 +1,10 @@
 # Mini-RAG-application
 a production-ready app for RAG application for question answering.
 
+
+![App](demo/screen1.png)
+![App](demo/screen2.png)
+
 ## Requirements
 
 - Python 3.8 or later
